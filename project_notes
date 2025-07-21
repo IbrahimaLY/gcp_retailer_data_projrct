@@ -1,0 +1,6 @@
+- setup cloud build trigger 
+    ==» to run the cloudbuild.yaml as soon as there are changes in repository
+    ==» all the dags and data gets updated in the composer bucket
+    ==» test your cicd
+    * create your trigger (declancheur) :
+       - name : add-dags-to-composer

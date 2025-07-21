@@ -139,6 +139,7 @@ WHEN MATCHED AND
         target.effective_end_date = current_timestamp();
 
 --Step 3: Insert New or Updated Records
+
 MERGE INTO `iconic-lane-464915-i5.silver_dataset.order_items` target
 USING 
   (SELECT DISTINCT
