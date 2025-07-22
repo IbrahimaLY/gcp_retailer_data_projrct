@@ -1,6 +1,165 @@
-- setup cloud build trigger 
-    ==» to run the cloudbuild.yaml as soon as there are changes in repository
-    ==» all the dags and data gets updated in the composer bucket
-    ==» test your cicd
-    * create your trigger (declancheur) :
-       - name : add-dags-to-composer
+Project steps GCP retail
+
+Pour acceder au JupyterLab apres creation du cluster:
+    - dataproc
+    - clusters
+    - open your cluster
+    - web interfaces
+    - JupiterLab
+
+gcp project details : gcloud projects list
+    PROJECT_ID: iconic-lane-464915-i5
+    NAME: gcp-retailer-project
+    PROJECT_NUMBER: 1083823170230
+`gcloud config set project [PROJECT_ID]` to change to a different project. :
+    gcloud config set project iconic-lane-464915-i5
+1- Create data sources:
+    a- create database : retailerDB database
+        Instance Mysql ID : retailer-mysql-db / pwd: 12345
+        database: retailerDB / user: myuser / pwd: mypass
+    b- create database : supplierDB database 
+        Instance Mysql ID : supplier-mysql-db / pwd: 12345 
+        database: supplierDB / user: myuser / pwd: mypass
+    c- create customer review api
+        mockapi.io / project name : reviews / API Prefix : retailer /
+                  API endpoint :
+                                https://686bf25714219674dcc6b3f2.mockapi.io/retailer/reviews
+                  Resource name : reviews
+
+2- gcs (storage) setup
+    a-create bucket / bucket name : retailer-datalake-project-08072025
+    b-create folders: 
+        1. configs:
+            - metadata driven approach
+            - retailer_config.csv
+            - supplier_config.csv
+        2. landing:
+            - ingestion
+                - retailer
+                - supplier
+                - api
+        3. temp
+            - pipeline_logs
+
+3- Data ingestion
+
+    - Shell run below scripts on gcp cloud Shell :
+        gcloud services enable \ 
+            bigquery.googleapis.com \ 
+            compute.googleapis.com \ 
+            storage.googleapis.com \ 
+            composer.googleapis.com \ 
+            dataproc.googleapis.com \ 
+            dataflow.googleapis.com \ 
+            secretmanager.googleapis.com \ 
+            sqladmin.googleapis.com \ 
+            cloudfunctions.googleapis.com \ 
+            cloudscheduler.googleapis.com \ 
+            cloudresourcemanager.googleapis.com
+        ou bien sans les \ :
+        
+        gcloud services enable bigquery.googleapis.com compute.googleapis.com storage.googleapis.com composer.googleapis.com dataproc.googleapis.com dataflow.googleapis.com secretmanager.googleapis.com sqladmin.googleapis.com cloudfunctions.googleapis.com cloudscheduler.googleapis.com cloudresourcemanager.googleapis.com
+        
+        gcloud beta billing projects describe iconic-lane-464915-i5
+    
+    - create dataproc cluster : 
+        CLUSTER_NAME="my-demo-cluster"
+        REGION="us-east1" 
+        gcloud dataproc clusters create ${CLUSTER_NAME} \
+            --region ${REGION} \
+            --num-workers=2 \
+            --worker-machine-type=n1-standard-2 \
+            --worker-boot-disk-size=50 \
+            --master-machine-type=n1-standard-2 \
+            --master-boot-disk-size=50 \
+            --image-version=2.0-debian10 \
+            --enable-component-gateway \
+            --optional-components=JUPYTER \
+            --initialization-actions=gs://goog-dataproc-initialization-actions-${REGION}/connectors/connectors.sh \
+            --metadata bigquery-connector-version=1.2.0 \
+            --metadata spark-bigquery-connector-version=0.21.0
+
+    - ingestion-1 : 
+        mysql-retailer-dbs ==> config,audit_tbl,archive, logs ==> gcs_bucket/landing/retailer-db/*
+            -- read from config file ???
+                    - what tables are scope for ingestion
+                    - load type 
+                        - full
+                        - incr (watermark)
+                    - target path
+            -- pipeline - scheduled - at 5 am
+                gcs_bucket
+                    landing
+                        retailer-db
+                            - archive
+                                - 2025
+                                    - 03
+                                        - 27
+                                            - products_27032025.json
+                                            - customers_27032025.json
+                                        - 28
+                                            - products_28032025.json
+                                            -customers_28032025.kson
+                            - products
+                                - products_29032025.json
+                            - customers
+                                - customers_29032025.json
+            -- audit table:
+
+            - extract the data from mysql-retailer-db for respective table and load to gcs landing
+                -- incr ==> get latest timestamp (audit table in bigquery(bq)) ==> compare with table watermark col ==> delta
+                -- full ==> total data from table will be fully loaded to gcs location
+            
+            - store the logs to gcs and bigquery for future purposes 
+
+            - ingestion-2 : mysql-supplier-dbs ==> config,audit_tbl,archive, logs ==> gcs_bucket/landing/supplier-db/*
+                1. read config file for metadata
+                2. archive the existing files in respective supplier-db folder in gcs
+                3. extract the data from mysql-supplier-db for respective table and load json to gcs landing
+                    -- incr ==> get latest timestamp (audit table in bigquery(bq)) ==> compare with table watermark col ==> delta
+                    -- full ==> total data from table will be fully loaded to gcs location
+                4. store the logs to gcs and bigquery for future purposes
+
+            ingestion-3 : review-api ===> gcs_bucket/landing/customer-reviews/*
+                - fetch the data from api
+                - convert api data to pd df 
+                - storing this df data locally
+                - from local, writing to gcs landing
+
+
+    bronze:
+        - gcs_bucket/landing/retailer-db/* ===> external tables ===> bronze_dataset/*
+        - gcs_bucket/landing/supplier-db/* ===> external tables ===> bronze_dataset/*
+        - gcs_bucket/landing/customer-reviews/* ===> external tables ===> bronze_dataset/*
+
+
+    silver:
+       -  bronze_dataset/* ==> nulls, duplicates, incr(scd2), full(truncate&load) ==> silver_dataset/*
+
+    gold:      
+      -  this is the main reason that so far we have done above steps
+      - what is that mean ?? valuable insights you are going to find in gold layer only
+      - example:
+            - sales summary
+            - customer engagement metrics    
+            - product performance
+            - supplier performance
+            - customer review summary
+      - silver_dataset/* ===> gold_dataset/{insight_tables} ===> BI (reports & dashboards)
+
+4- Workflow orchestration
+    - Create Composer Environment
+        - name : demo-instance
+    - create dags
+        - pyspark_dag
+        - bq_dag
+        - parent_dag
+    -CI/CD :
+        - setup composer Environment
+        - setup gitHub
+        - setup Cloud build trigger
+            ==» to run the cloudbuild.yaml as soon as there are changes in repository
+            ==» all the dags and data gets updated in the composer bucket
+            ==» test your cicd
+            * create your trigger (declancheur) :
+            - name : add-dags-to-composer
